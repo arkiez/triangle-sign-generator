@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PyInstaller build artifacts (สร้างใหม่ได้จาก build_exe.bat / TriangleSign.spec)
+build/
+dist/
+*.manifest
+
+# ไฟล์ผลลัพธ์ที่โปรแกรมสร้าง
+output/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

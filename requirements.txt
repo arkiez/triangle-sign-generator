@@ -1,0 +1,5 @@
+# โปรแกรมสร้างป้ายสามเหลี่ยม (Word) — Mail Merge
+docx-mailmerge2>=1.0.1   # เติมค่าลง MERGEFIELD ของ template (หัวใจ ไม่ต้องมี Word)
+pywin32>=305             # เชื่อม Microsoft Word: เปิด/ส่งออก PDF/สั่งพิมพ์
+pymupdf>=1.23            # เรนเดอร์ PDF -> รูป สำหรับพรีวิวในโปรแกรม
+openpyxl>=3.1            # อ่านไฟล์ Excel (.xlsx) สำหรับโหมดนำเข้ารายชื่อ
