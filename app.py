@@ -19,7 +19,7 @@ import merge_engine as me
 import word_io as wio
 import data_io
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 CREATOR = "Powered by Arkie'z K. Khositkhanawut"
 
 # ฟอนต์: ฝัง Kanit ทั้งเนื้อหาและหัวข้อ มากับโปรแกรม โหลดแบบ private
