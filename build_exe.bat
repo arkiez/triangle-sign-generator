@@ -1,12 +1,21 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+
+rem อ่านเลขเวอร์ชันจาก app.py (APP_VERSION = "x.y.z") มาตั้งชื่อไฟล์ให้อัตโนมัติ
+set "VER=dev"
+for /f tokens^=2^ delims^=^" %%v in ('findstr /b /c:"APP_VERSION" app.py') do set "VER=%%v"
+
 echo ============================================================
-echo  กำลังสร้างไฟล์ .exe (ใช้เวลาสักครู่ 2-5 นาที)
+echo  กำลังสร้างไฟล์ .exe เวอร์ชัน %VER% (ใช้เวลาสักครู่ 2-5 นาที)
 echo ============================================================
-py -3.12 -m pip install --upgrade pyinstaller
+py -3.12 -m pip install --upgrade pyinstaller pillow
+
+rem สร้างรูปหน้าโหลด (splash) ให้ตรงเวอร์ชันล่าสุดก่อนเสมอ
+py -3.12 make_splash.py
+
 py -3.12 -m PyInstaller --noconfirm --onefile --windowed ^
-  --name "TriangleSign" ^
+  --name "TriangleSign-v%VER%" ^
   --icon "app.ico" ^
   --splash "splash.png" ^
   --add-data "templates;templates" ^
@@ -22,7 +31,7 @@ py -3.12 -m PyInstaller --noconfirm --onefile --windowed ^
   app.py
 echo.
 echo ============================================================
-echo  เสร็จแล้ว! ไฟล์โปรแกรมอยู่ที่   dist\TriangleSign.exe
+echo  เสร็จแล้ว! ไฟล์โปรแกรมอยู่ที่   dist\TriangleSign-v%VER%.exe
 echo  (ดับเบิลคลิกเปิดได้เลย ไม่ต้องลง Python)
 echo ============================================================
 pause
