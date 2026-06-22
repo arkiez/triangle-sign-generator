@@ -93,7 +93,7 @@ def _row_to_data(template_type: str, row: dict) -> dict:
 # ---------------------------------------------------------------------------
 # API หลัก
 # ---------------------------------------------------------------------------
-def generate_one(template_type, name, position="", org="", out_path=None) -> str:
+def generate_one(template_type, name, position="", org="", out_path=None, logo=None) -> str:
     """สร้างป้าย 1 ใบ (1 คน = 1 หน้า, เติมครบทั้ง 4 จุดด้วยค่าเดียวกัน)
     คืนค่า: path ของไฟล์ .docx ที่สร้าง"""
     tpl = template_path(template_type)
@@ -103,11 +103,11 @@ def generate_one(template_type, name, position="", org="", out_path=None) -> str
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         out_path = unique_path(os.path.join(OUTPUT_DIR, sanitize_filename(name) + ".docx"))
 
-    _merge_to_file(tpl, [data], out_path)
+    _merge_to_file(tpl, [data], out_path, logo=logo)
     return out_path
 
 
-def generate_batch(template_type, rows, out_path, separate=False):
+def generate_batch(template_type, rows, out_path, separate=False, logo=None):
     """สร้างป้ายหลายใบจากรายการ rows (list ของ dict {name, position, org})
     - separate=False : รวมเป็นไฟล์เดียว (1 คน = 1 หน้า) -> out_path เป็นไฟล์ .docx
     - separate=True  : แยกไฟล์ต่อคน -> out_path เป็นโฟลเดอร์
@@ -124,24 +124,24 @@ def generate_batch(template_type, rows, out_path, separate=False):
         paths = []
         for r, d in zip(rows, datas):
             p = unique_path(os.path.join(out_path, sanitize_filename(r.get("name")) + ".docx"))
-            _merge_to_file(tpl, [d], p)
+            _merge_to_file(tpl, [d], p, logo=logo)
             paths.append(p)
         return paths
 
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    _merge_to_file(tpl, datas, out_path)
+    _merge_to_file(tpl, datas, out_path, logo=logo)
     return [out_path]
 
 
 # ---------------------------------------------------------------------------
 # ตัวเติมจริง: docx-mailmerge2 (หลัก) + fallback
 # ---------------------------------------------------------------------------
-def _merge_to_file(tpl, datas, out_path):
+def _merge_to_file(tpl, datas, out_path, logo=None):
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     try:
         from mailmerge import MailMerge
     except ImportError:
-        return _merge_fallback(tpl, datas, out_path)
+        return _merge_fallback(tpl, datas, out_path, logo=logo)
 
     # กัน "หน้ากระดาษเปล่าคั่นระหว่างคน" ตอน merge หลายคน:
     # template บางไฟล์มี section break (sectPr) ฝังในย่อหน้า ทำให้ขึ้นหน้าใหม่เอง
@@ -158,6 +158,8 @@ def _merge_to_file(tpl, datas, out_path):
         mm.write(out_path)
 
     _autoshrink(out_path)  # ย่อฟอนต์อัตโนมัติถ้าข้อความยาวเกินกล่อง
+    if logo and logo.get("path") and os.path.exists(logo["path"]):
+        _insert_logo(out_path, logo)  # ฉีดโลโก้/ตรา ลงทุกหน้า (หลัง autoshrink)
     return out_path
 
 
@@ -167,7 +169,10 @@ def _merge_to_file(tpl, datas, out_path):
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 _WPS = "{http://schemas.microsoft.com/office/word/2010/wordprocessingShape}"
+_WP = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
+_PIC = "{http://schemas.openxmlformats.org/drawingml/2006/picture}"
 _EMU_PER_PT = 12700.0
+_EMU_PER_CM = 360000.0      # 1 ซม. = 360000 EMU (1 นิ้ว = 914400)
 _SHRINK_FLOOR = 0.40        # ไม่ย่อเล็กกว่า 40% ของขนาดเดิม
 _MIN_HALFPT = 32            # และไม่เล็กกว่า 16pt เด็ดขาด
 
@@ -336,6 +341,218 @@ def _autoshrink(path):
     os.replace(tmp, path)
 
 
+# ---------------------------------------------------------------------------
+# ใส่โลโก้/ตรา: ฉีดรูปลอย (floating picture) ลงทุกหน้าของป้าย หลัง merge เสร็จ
+#   logo = {"path", "x_cm", "y_cm", "w_cm", "h_cm"}
+#   - วางที่กล่องข้อความ «name» ของแต่ละหน้า + ออฟเซ็ต X/Y ของผู้ใช้ (X/Y เท่ากันทุกหน้า)
+#   - หมุนตามหน้านั้น (rot เดียวกับกล่องข้อความ) -> อ่านถูกด้านทุกหน้า
+#   - รูป 1 ไฟล์ + 1 relationship ใช้ร่วมทุกหน้า/ทุกเพจ (เหมือน template ใช้ภาพพื้นหลังร่วม)
+# ---------------------------------------------------------------------------
+_CT_BY_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+# โครงรูปลอย 1 ตัว (ประกาศ namespace ครบบน <w:r> แล้ว format ค่าลงไป)
+_LOGO_DRAWING = (
+    '<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+    ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+    ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    '<w:drawing>'
+    '<wp:anchor distT="0" distB="0" distL="114300" distR="114300" simplePos="0"'
+    ' relativeHeight="{rh}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">'
+    '<wp:simplePos x="0" y="0"/>'
+    '<wp:positionH relativeFrom="{rel_h}"><wp:posOffset>{off_x}</wp:posOffset></wp:positionH>'
+    '<wp:positionV relativeFrom="{rel_v}"><wp:posOffset>{off_y}</wp:posOffset></wp:positionV>'
+    '<wp:extent cx="{cx}" cy="{cy}"/>'
+    '<wp:effectExtent l="0" t="0" r="0" b="0"/>'
+    '<wp:wrapNone/>'
+    '<wp:docPr id="{did}" name="logo{did}"/>'
+    '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+    '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+    '<pic:pic>'
+    '<pic:nvPicPr><pic:cNvPr id="{did}" name="logo{did}"/>'
+    '<pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr></pic:nvPicPr>'
+    '<pic:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+    '<pic:spPr><a:xfrm rot="{rot}"><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
+    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+    '</pic:pic></a:graphicData></a:graphic>'
+    '</wp:anchor></w:drawing></w:r>'
+)
+
+
+def _insert_logo(path, logo):
+    """ฉีดรูปโลโก้ (floating, ทับบนสามเหลี่ยม) ลงทุกหน้า/ทุกเพจของไฟล์ผลลัพธ์"""
+    try:
+        from lxml import etree
+    except ImportError:
+        return
+
+    src = logo.get("path") or ""
+    ext = os.path.splitext(src)[1].lower()
+    ctype = _CT_BY_EXT.get(ext)
+    if not ctype or not os.path.exists(src):
+        return  # รองรับเฉพาะ png/jpg/jpeg และต้องมีไฟล์จริง
+
+    def _cm(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # ขนาดรูปจริง (ไว้คำนวณ cy จากอัตราส่วนถ้าไม่ได้ระบุ h_cm)
+    nw = nh = 0
+    try:
+        import fitz
+        pix = fitz.Pixmap(src)
+        nw, nh = pix.width, pix.height
+    except Exception:
+        nw = nh = 0
+
+    off_x = round(_cm(logo.get("x_cm")) * _EMU_PER_CM)
+    off_y = round(_cm(logo.get("y_cm")) * _EMU_PER_CM)
+    w_cm = _cm(logo.get("w_cm")) or 3.0
+    h_cm = _cm(logo.get("h_cm"))
+    cx = round(w_cm * _EMU_PER_CM)
+    if h_cm > 0:
+        cy = round(h_cm * _EMU_PER_CM)
+    elif nw and nh:
+        cy = round(w_cm * nh / nw * _EMU_PER_CM)
+    else:
+        cy = cx
+    if cx <= 0 or cy <= 0:
+        return
+
+    try:
+        with open(src, "rb") as f:
+            img_bytes = f.read()
+        with zipfile.ZipFile(path) as z:
+            names = set(z.namelist())
+            doc_xml = z.read("word/document.xml")
+            rels_xml = z.read("word/_rels/document.xml.rels")
+            ct_xml = z.read("[Content_Types].xml")
+    except Exception:
+        return
+
+    # ตั้งชื่อไฟล์ media ไม่ให้ชนของเดิม
+    i = 1
+    while ("word/media/logo%d%s" % (i, ext)) in names:
+        i += 1
+    media = "word/media/logo%d%s" % (i, ext)
+
+    # ---- rels: เพิ่ม relationship รูป 1 ตัว (ใช้ร่วมทุกหน้า) ----
+    pkg_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    rels_root = etree.fromstring(rels_xml)
+    max_rid = 0
+    for rel in rels_root:
+        m = re.match(r"rId(\d+)$", rel.get("Id") or "")
+        if m:
+            max_rid = max(max_rid, int(m.group(1)))
+    new_rid = "rId%d" % (max_rid + 1)
+    rel_el = etree.SubElement(rels_root, "{%s}Relationship" % pkg_ns)
+    rel_el.set("Id", new_rid)
+    rel_el.set("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")
+    rel_el.set("Target", "media/%s" % os.path.basename(media))
+
+    # ---- [Content_Types].xml: ใส่ Default ของนามสกุล (ถ้ายังไม่มี) ----
+    ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+    ct_root = etree.fromstring(ct_xml)
+    ext_key = ext.lstrip(".")
+    if not any((d.get("Extension") or "").lower() == ext_key
+               for d in ct_root.findall("{%s}Default" % ct_ns)):
+        d = etree.SubElement(ct_root, "{%s}Default" % ct_ns)
+        d.set("Extension", ext_key)
+        d.set("ContentType", ctype)
+
+    # ---- document.xml: วนทุก anchor ที่มีกล่องข้อความ (= ทุกหน้า ทุกเพจ) ----
+    doc_root = etree.fromstring(doc_xml)
+
+    def _off(pos_el):
+        o = pos_el.find(_WP + "posOffset")
+        try:
+            return int(o.text)
+        except (AttributeError, TypeError, ValueError):
+            return 0
+
+    def _run_of(el):
+        p = el.getparent()
+        while p is not None:
+            if p.tag == _W + "r":
+                return p
+            p = p.getparent()
+        return None
+
+    # หา id สูงสุดของ docPr/cNvPr กัน id ซ้ำ
+    max_id = 0
+    for el in doc_root.iter():
+        if el.tag in (_WP + "docPr", _PIC + "cNvPr"):
+            try:
+                max_id = max(max_id, int(el.get("id")))
+            except (TypeError, ValueError):
+                pass
+
+    anchors = [a for a in doc_root.iter(_WP + "anchor")
+               if a.find(".//" + _W + "txbxContent") is not None]
+    if not anchors:
+        return
+
+    did = max_id
+    changed = False
+    for k, anc in enumerate(anchors):
+        ph = anc.find(_WP + "positionH")
+        pv = anc.find(_WP + "positionV")
+        run = _run_of(anc)
+        if ph is None or pv is None or run is None or run.getparent() is None:
+            continue
+        # Word เรนเดอร์การหมุนของ "กล่องข้อความ" ต่างจาก "รูป" จึงคัดลอก rot ตรง ๆ ไม่ได้
+        # กล่องชื่อหน้าที่ "อ่านปกติบนหน้ากระดาษ" จะมี flipV (Word จัดข้อความให้ตั้งตรง)
+        # ส่วนหน้าที่ไม่มี flipV จะพิมพ์กลับหัวบนกระดาษ
+        # X/Y = ระยะจาก "มุมซ้ายบนของชื่อ" ในทิศที่อ่าน (ให้ความหมายเดียวกันทุกหน้า)
+        xfrm = anc.find(".//" + _A + "xfrm")
+        base_x = _off(ph)
+        base_y = _off(pv)
+        if xfrm is not None and xfrm.get("flipV"):
+            # หน้าอ่านปกติ: รูปไม่หมุน วางจากมุมซ้ายบนกล่อง + ออฟเซ็ต
+            lx, ly, rot_val = base_x + off_x, base_y + off_y, "0"
+        else:
+            # หน้ากลับหัว: รูปหมุน 180° และสะท้อนออฟเซ็ตจากมุมขวาล่างของกล่อง
+            # เพื่อให้พับแล้วโลโก้อยู่จุดเดียวกับหน้าอื่น (เทียบกับชื่อ)
+            ext = anc.find(_WP + "extent")
+            bw = int(ext.get("cx")) if ext is not None and ext.get("cx") else 0
+            bh = int(ext.get("cy")) if ext is not None and ext.get("cy") else 0
+            lx, ly, rot_val = base_x + bw - off_x - cx, base_y + bh - off_y - cy, "10800000"
+        did += 1
+        xml = _LOGO_DRAWING.format(
+            rh=251665408 + k,
+            rel_h=ph.get("relativeFrom") or "column",
+            rel_v=pv.get("relativeFrom") or "paragraph",
+            off_x=lx, off_y=ly,
+            cx=cx, cy=cy, did=did, rid=new_rid, rot=rot_val,
+        )
+        run.addnext(etree.fromstring(xml))
+        changed = True
+
+    if not changed:
+        return
+
+    new_doc = etree.tostring(doc_root, xml_declaration=True, encoding="UTF-8", standalone=True)
+    new_rels = etree.tostring(rels_root, xml_declaration=True, encoding="UTF-8", standalone=True)
+    new_ct = etree.tostring(ct_root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+    tmp = path + ".logo"
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            if item.filename == "word/document.xml":
+                zout.writestr(item, new_doc)
+            elif item.filename == "word/_rels/document.xml.rels":
+                zout.writestr(item, new_rels)
+            elif item.filename == "[Content_Types].xml":
+                zout.writestr(item, new_ct)
+            else:
+                zout.writestr(item, zin.read(item.filename))
+        zout.writestr(media, img_bytes)
+    os.replace(tmp, path)
+
+
 # แคชผลการ normalize ไว้ใช้ซ้ำ (key = abspath ของ template, value = (mtime, path))
 _norm_cache = {}
 
@@ -404,7 +621,7 @@ def _to_xml_value(value: str) -> str:
     return _CR.join(_xml_escape(p) for p in parts)
 
 
-def _merge_fallback(tpl, datas, out_path):
+def _merge_fallback(tpl, datas, out_path, logo=None):
     """รองรับ 1 คน/ไฟล์เท่านั้น (กรณีไม่มี docx-mailmerge2)."""
     if len(datas) != 1:
         raise RuntimeError(
@@ -430,6 +647,8 @@ def _merge_fallback(tpl, datas, out_path):
                 content = text.encode("utf-8")
             zout.writestr(item, content)
     os.replace(tmp, out_path)
+    if logo and logo.get("path") and os.path.exists(logo["path"]):
+        _insert_logo(out_path, logo)
     return out_path
 
 

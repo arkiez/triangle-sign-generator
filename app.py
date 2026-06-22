@@ -19,7 +19,7 @@ import merge_engine as me
 import word_io as wio
 import data_io
 
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 CREATOR = "Powered by Arkie'z K. Khositkhanawut"
 
 # ฟอนต์: ฝัง Kanit ทั้งเนื้อหาและหัวข้อ มากับโปรแกรม โหลดแบบ private
@@ -94,6 +94,16 @@ class App(tk.Tk):
         self._spin_job = None     # after id ของสปินเนอร์ (None = ไม่หมุน)
         self._spin_angle = 0
         self._spin_text = "กำลังทำงาน…"
+
+        # ---- โลโก้/ตรา (รูปเดียว ใช้ทุกป้าย) ----
+        self.logo_path = None             # path รูปที่เลือก (None = ไม่ใส่)
+        self.logo_enabled = tk.BooleanVar(value=False)
+        self.logo_x = tk.StringVar(value="1.00")  # ออฟเซ็ตแนวนอน (ซม.)
+        self.logo_y = tk.StringVar(value="1.00")  # ออฟเซ็ตแนวตั้ง (ซม.)
+        self.logo_w = tk.StringVar(value="3.00")  # ความกว้าง (ซม.)
+        self.logo_h = tk.StringVar(value="3.00")  # ความสูง (ซม.) — ล็อกสัดส่วนอัตโนมัติ
+        self._logo_native = None          # (w_px, h_px) ของรูปจริง ไว้ล็อกสัดส่วน
+        self._logo_lock = False           # กันลูปตอนซิงก์ W<->H
 
         self._build_ui()
         self._install_clipboard()
@@ -192,6 +202,19 @@ class App(tk.Tk):
                   foreground=[("active", COL_ACCENT)],
                   indicatorcolor=[("selected", COL_ACCENT), ("pressed", COL_ACCENT)])
 
+        # เช็กบ็อกซ์: ติ๊กแล้วกล่องเป็นสีเน้น (เครื่องหมายถูกสีขาวบนพื้นสีเน้น) ไม่ติ๊ก=กล่องขาว
+        style.configure("TCheckbutton", background=COL_CARD, foreground=COL_TEXT,
+                        font=(FONT_FAMILY, 11), focuscolor=COL_CARD,
+                        indicatorforeground="white")
+        style.map("TCheckbutton",
+                  background=[("active", COL_CARD)],
+                  foreground=[("active", COL_ACCENT)],
+                  indicatorforeground=[("selected", "white"), ("!selected", COL_FIELD)],
+                  indicatorbackground=[("selected", COL_ACCENT), ("pressed", COL_ACCENT),
+                                       ("!selected", COL_FIELD)],
+                  indicatorcolor=[("selected", COL_ACCENT), ("pressed", COL_ACCENT),
+                                  ("!selected", COL_FIELD)])
+
         # ช่องกรอก: พื้นขาว ขอบบาง โฟกัสแล้วขอบเป็นสีเน้น
         style.configure("TEntry", fieldbackground=COL_FIELD, foreground=COL_TEXT,
                         bordercolor=COL_BTN_BORDER, relief="solid", borderwidth=1,
@@ -249,6 +272,55 @@ class App(tk.Tk):
                   background=[("active", COL_ACCENT_HOVER), ("pressed", COL_ACCENT_ACTIVE),
                               ("disabled", "#c7d2e4")],
                   foreground=[("disabled", "#eef2f8")])
+
+        # เช็กบ็อกซ์โลโก้: ธีม clam วาดตัวบ่งชี้ติ๊กเป็น "กากบาท (X)" จึงวาดไอคอน
+        # กล่อง+เครื่องหมายถูก (✓) เองด้วย fitz แล้วทำเป็น element รูปแทน
+        self._logo_cb_style = "TCheckbutton"
+        try:
+            self._cb_img_on = self._make_check_image(True)
+            self._cb_img_off = self._make_check_image(False)
+            style.element_create("Logo.indicator", "image", self._cb_img_off,
+                                 ("selected", self._cb_img_on), border=0, sticky="")
+            style.layout("Logo.TCheckbutton", [
+                ("Checkbutton.padding", {"sticky": "nswe", "children": [
+                    ("Logo.indicator", {"side": "left", "sticky": ""}),
+                    ("Checkbutton.focus", {"side": "left", "sticky": "", "children": [
+                        ("Checkbutton.label", {"side": "left", "sticky": ""}),
+                    ]}),
+                ]}),
+            ])
+            style.configure("Logo.TCheckbutton", background=COL_CARD, foreground=COL_TEXT,
+                            font=(FONT_FAMILY, 11), focuscolor=COL_CARD, padding=(0, 2))
+            style.map("Logo.TCheckbutton",
+                      background=[("active", COL_CARD)],
+                      foreground=[("active", COL_ACCENT)])
+            self._logo_cb_style = "Logo.TCheckbutton"
+        except Exception:
+            pass
+
+    def _make_check_image(self, checked, s=20):
+        """วาดไอคอนเช็กบ็อกซ์ (กล่อง + เครื่องหมายถูก) ด้วย fitz -> Tk PhotoImage
+        ใช้แทนตัวบ่งชี้ของธีม clam ที่วาดติ๊กเป็นกากบาท (X)"""
+        import base64
+        import fitz
+
+        def _rgb(h):
+            h = h.lstrip("#")
+            return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+        doc = fitz.open()
+        pg = doc.new_page(width=s, height=s)
+        pg.draw_rect(fitz.Rect(0, 0, s, s), color=_rgb(COL_CARD), fill=_rgb(COL_CARD))
+        if checked:
+            acc = _rgb(COL_ACCENT)
+            pg.draw_rect(fitz.Rect(2, 2, s - 2, s - 2), color=acc, fill=acc, radius=0.25, width=1)
+            pg.draw_polyline([fitz.Point(5, 10.5), fitz.Point(8.5, 14), fitz.Point(15, 6)],
+                             color=(1, 1, 1), width=2.2)
+        else:
+            pg.draw_rect(fitz.Rect(2, 2, s - 2, s - 2), color=_rgb(COL_BTN_BORDER),
+                         fill=_rgb(COL_FIELD), radius=0.25, width=1.3)
+        data = base64.b64encode(pg.get_pixmap(alpha=False).tobytes("png")).decode("ascii")
+        return tk.PhotoImage(data=data)
 
     # --------------------------------------------------- พื้นที่เลื่อน (ซ้าย)
     def _make_scroll_column(self, parent, width):
@@ -518,6 +590,52 @@ class App(tk.Tk):
         ttk.Radiobutton(ob, text="แยกไฟล์ต่อคน", value="separate",
                         variable=self.batch_output).pack(side="left")
 
+        # ---- โลโก้/ตรา (รูปเดียว ใช้กับทุกป้าย ทั้งสองโหมด) ----
+        lf = ttk.LabelFrame(left, text=" โลโก้/ตรา ", padding=12)
+        lf.pack(fill="x", pady=(10, 0))
+
+        rowf = ttk.Frame(lf)
+        rowf.pack(fill="x")
+        ttk.Checkbutton(rowf, text=" ใส่โลโก้", style=self._logo_cb_style,
+                        variable=self.logo_enabled,
+                        command=self._on_logo_toggle).pack(side="left")
+        ttk.Button(rowf, text="🖼 เลือกรูป…", command=self._choose_logo).pack(side="left", padx=(8, 4))
+        ttk.Button(rowf, text="ลบรูป", command=self._clear_logo).pack(side="left")
+        self.lbl_logo = ttk.Label(lf, text="ยังไม่ได้เลือกรูป", font=SMALL_FONT, foreground=COL_MUTED)
+        self.lbl_logo.pack(anchor="w", pady=(6, 4))
+
+        grid = ttk.Frame(lf)
+        grid.pack(fill="x")
+        ttk.Label(grid, text="ตำแหน่ง X (ซม.)", font=UI_FONT).grid(row=0, column=0, sticky="w", pady=3)
+        self.e_logo_x = ttk.Entry(grid, textvariable=self.logo_x, font=UI_FONT, width=8, justify="right")
+        self.e_logo_x.grid(row=0, column=1, sticky="w", padx=(6, 16), pady=3)
+        ttk.Label(grid, text="Y (ซม.)", font=UI_FONT).grid(row=0, column=2, sticky="w", pady=3)
+        self.e_logo_y = ttk.Entry(grid, textvariable=self.logo_y, font=UI_FONT, width=8, justify="right")
+        self.e_logo_y.grid(row=0, column=3, sticky="w", padx=(6, 0), pady=3)
+
+        ttk.Label(grid, text="กว้าง (ซม.)", font=UI_FONT).grid(row=1, column=0, sticky="w", pady=3)
+        self.e_logo_w = ttk.Entry(grid, textvariable=self.logo_w, font=UI_FONT, width=8, justify="right")
+        self.e_logo_w.grid(row=1, column=1, sticky="w", padx=(6, 16), pady=3)
+        ttk.Label(grid, text="สูง (ซม.)", font=UI_FONT).grid(row=1, column=2, sticky="w", pady=3)
+        self.e_logo_h = ttk.Entry(grid, textvariable=self.logo_h, font=UI_FONT, width=8, justify="right")
+        self.e_logo_h.grid(row=1, column=3, sticky="w", padx=(6, 0), pady=3)
+
+        tk.Label(lf, bg=COL_CARD, fg=COL_MUTED, font=SMALL_FONT, justify="left",
+                 text="ปรับขนาดล็อกสัดส่วนอัตโนมัติ · โลโก้จะขึ้นทุกหน้าของป้าย (หมุนตามหน้า)"
+                 ).pack(anchor="w", pady=(6, 0))
+
+        # แก้ค่า -> ล็อกสัดส่วน W<->H + ล้างแคชพรีวิว (เพราะรูปที่เรนเดอร์เปลี่ยน)
+        self.e_logo_w.bind("<KeyRelease>", lambda e: (self._sync_logo_h(), self._preview_cache.clear()))
+        self.e_logo_h.bind("<KeyRelease>", lambda e: (self._sync_logo_w(), self._preview_cache.clear()))
+        self.e_logo_x.bind("<KeyRelease>", lambda e: self._preview_cache.clear())
+        self.e_logo_y.bind("<KeyRelease>", lambda e: self._preview_cache.clear())
+        # ออกจากช่อง -> จัดรูปแบบเป็นทศนิยม 2 หลักให้สวยงาม (เช่น 1 -> 1.00)
+        for ent, var in ((self.e_logo_x, self.logo_x), (self.e_logo_y, self.logo_y),
+                         (self.e_logo_w, self.logo_w), (self.e_logo_h, self.logo_h)):
+            ent.bind("<FocusOut>", lambda e, v=var: self._fmt_logo(v), add="+")
+        self._logo_entries = [self.e_logo_x, self.e_logo_y, self.e_logo_w, self.e_logo_h]
+        self._refresh_logo_state()
+
         # ---- ปุ่มคำสั่ง (จัดเป็นกริด 2 คอลัมน์ ให้ประหยัดความสูง) ----
         bf = ttk.Frame(left, style="Surface.TFrame")
         bf.pack(fill="x", pady=(12, 0))
@@ -632,6 +750,102 @@ class App(tk.Tk):
     def _set_status(self, text, color="#246"):
         self.status.configure(text=text, foreground=color)
 
+    # ----------------------------------------------------------- โลโก้/ตรา
+    def _on_logo_toggle(self):
+        self._refresh_logo_state()
+        self._preview_cache.clear()
+
+    def _refresh_logo_state(self):
+        """เปิด/ปิดช่องกรอกตำแหน่ง/ขนาด ตามสถานะ checkbox"""
+        on = self.logo_enabled.get()
+        for e in getattr(self, "_logo_entries", []):
+            e.state(["!disabled"] if on else ["disabled"])
+
+    def _fmt_logo(self, var):
+        """จัดรูปแบบค่าในช่องเป็นทศนิยม 2 หลัก (ถ้าไม่ใช่ตัวเลขก็ปล่อยไว้)"""
+        try:
+            var.set(f"{float(var.get()):.2f}")
+        except (TypeError, ValueError):
+            pass
+
+    def _choose_logo(self):
+        p = filedialog.askopenfilename(
+            title="เลือกรูปโลโก้/ตรา",
+            filetypes=[("รูปภาพ", "*.png *.jpg *.jpeg"), ("ทั้งหมด", "*.*")],
+        )
+        if not p:
+            return
+        try:
+            import fitz
+            pix = fitz.Pixmap(p)
+            self._logo_native = (pix.width, pix.height)
+        except Exception as e:
+            messagebox.showerror("เปิดรูปไม่ได้", f"อ่านรูปนี้ไม่ได้:\n{e}")
+            return
+        self.logo_path = p
+        self.logo_enabled.set(True)
+        self.lbl_logo.configure(text="🖼 " + os.path.basename(p))
+        self._sync_logo_h()           # เติมความสูงตามสัดส่วนจริง
+        self._preview_cache.clear()
+        self._refresh_logo_state()
+
+    def _clear_logo(self):
+        self.logo_path = None
+        self._logo_native = None
+        self.logo_enabled.set(False)
+        self.lbl_logo.configure(text="ยังไม่ได้เลือกรูป")
+        self._preview_cache.clear()
+        self._refresh_logo_state()
+
+    def _sync_logo_h(self):
+        """W เปลี่ยน -> คำนวณ H ตามสัดส่วนรูปจริง (ล็อกสัดส่วน)"""
+        if self._logo_lock or not self._logo_native:
+            return
+        try:
+            w = float(self.logo_w.get())
+        except ValueError:
+            return
+        nw, nh = self._logo_native
+        if nw <= 0:
+            return
+        self._logo_lock = True
+        self.logo_h.set(f"{w * nh / nw:.2f}")
+        self._logo_lock = False
+
+    def _sync_logo_w(self):
+        """H เปลี่ยน -> คำนวณ W ตามสัดส่วนรูปจริง (ล็อกสัดส่วน)"""
+        if self._logo_lock or not self._logo_native:
+            return
+        try:
+            h = float(self.logo_h.get())
+        except ValueError:
+            return
+        nw, nh = self._logo_native
+        if nh <= 0:
+            return
+        self._logo_lock = True
+        self.logo_w.set(f"{h * nw / nh:.2f}")
+        self._logo_lock = False
+
+    def _logo_payload(self):
+        """ค่าโลโก้แบบ pure data (worker-safe). None = ไม่ใส่โลโก้"""
+        if not (self.logo_path and self.logo_enabled.get() and os.path.exists(self.logo_path)):
+            return None
+
+        def f(v, d):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return d
+
+        return {
+            "path": self.logo_path,
+            "x_cm": f(self.logo_x.get(), 0.0),
+            "y_cm": f(self.logo_y.get(), 0.0),
+            "w_cm": max(f(self.logo_w.get(), 3.0), 0.1),
+            "h_cm": max(f(self.logo_h.get(), 0.0), 0.0),
+        }
+
     def _snapshot(self):
         """อ่านค่าจากหน้าจอบนเธรดหลัก -> เป็นข้อมูลล้วน (ส่งให้ worker ใช้ได้อย่างปลอดภัย)
         Tkinter เรียกข้ามเธรดไม่ได้ จึง snapshot ก่อนแล้วค่อยส่งงานเข้า worker"""
@@ -646,22 +860,24 @@ class App(tk.Tk):
             },
             "rows": list(self._batch_rows),
             "preview_index": self._preview_index,
+            "logo": self._logo_payload(),
         }
 
     def _gen_docx(self, job, out_path, first_only=False):
         """สร้างไฟล์ .docx จาก snapshot (งานล้วน ไม่แตะ Tk -> เรียกบน worker ได้)
         คืนค่า path (หรือ list สำหรับ separate)"""
         ttype = job["ttype"]
+        logo = job.get("logo")
         if job["mode"] == "single":
             d = job["single"]
-            return me.generate_one(ttype, d["name"], d["position"], d["org"], out_path=out_path)
+            return me.generate_one(ttype, d["name"], d["position"], d["org"], out_path=out_path, logo=logo)
         rows = job["rows"]
         if first_only:
             r = rows[0]
-            return me.generate_one(ttype, r["name"], r.get("position", ""), r.get("org", ""), out_path=out_path)
+            return me.generate_one(ttype, r["name"], r.get("position", ""), r.get("org", ""), out_path=out_path, logo=logo)
         if job["batch_output"] == "separate":
-            return me.generate_batch(ttype, rows, out_path, separate=True)
-        return me.generate_batch(ttype, rows, out_path, separate=False)[0]
+            return me.generate_batch(ttype, rows, out_path, separate=True, logo=logo)
+        return me.generate_batch(ttype, rows, out_path, separate=False, logo=logo)[0]
 
     def _default_name(self):
         if self.mode.get() == "single":
@@ -751,7 +967,8 @@ class App(tk.Tk):
             if not (png and os.path.exists(png)):  # ยังไม่มีในแคช -> สร้างใหม่
                 r = job["rows"][idx]
                 tmp = os.path.join(tempfile.gettempdir(), f"_tent_prev_{idx}.docx")
-                docx = me.generate_one(ttype, r["name"], r.get("position", ""), r.get("org", ""), out_path=tmp)
+                docx = me.generate_one(ttype, r["name"], r.get("position", ""), r.get("org", ""),
+                                       out_path=tmp, logo=job.get("logo"))
                 png = os.path.join(tempfile.gettempdir(), f"_tent_prev_{idx}.png")
                 png = wio.render_preview_png(docx, png, dpi=PREVIEW_DPI)
                 self._preview_cache[key] = png
@@ -760,7 +977,8 @@ class App(tk.Tk):
         # โหมดทีละคน
         d = job["single"]
         tmp = os.path.join(tempfile.gettempdir(), "_tent_preview_src.docx")
-        docx = me.generate_one(ttype, d["name"], d["position"], d["org"], out_path=tmp)
+        docx = me.generate_one(ttype, d["name"], d["position"], d["org"], out_path=tmp,
+                               logo=job.get("logo"))
         png = wio.render_preview_png(docx, dpi=PREVIEW_DPI)
         return ("preview", png, "พรีวิวเรียบร้อย")
 
