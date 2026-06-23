@@ -19,7 +19,7 @@ import merge_engine as me
 import word_io as wio
 import data_io
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 CREATOR = "Powered by Arkie'z K. Khositkhanawut"
 
 # ฟอนต์: ฝัง Kanit ทั้งเนื้อหาและหัวข้อ มากับโปรแกรม โหลดแบบ private
@@ -55,23 +55,159 @@ def _load_private_fonts(font_dir=None):
                 pass
 PREVIEW_DPI = 70  # ~820px กว้างสำหรับ A4 แนวนอน
 
-# ---- จานสี (Polished Light) ----
-COL_BG = "#f5f7fb"          # พื้นหลังหลัก (เทาอมฟ้าอ่อนมาก)
-COL_CARD = "#ffffff"        # พื้นผิวการ์ด/พรีวิว
-COL_TEXT = "#1e293b"        # ข้อความหลัก
-COL_MUTED = "#64748b"       # ข้อความรอง
-COL_BORDER = "#e3e8f0"      # เส้นขอบบาง
-COL_FIELD = "#ffffff"       # พื้นช่องกรอก
-COL_ROW_ALT = "#f8fafc"     # แถวสลับในตาราง
-COL_BTN_BORDER = "#cbd5e1"  # ขอบปุ่มรอง
+# ---- จานสี (Fluent / Windows 11 — Light) ----
+COL_BG = "#f3f3f3"          # พื้นหลัง Mica (เทาอ่อนแบบ Win11)
+COL_CARD = "#ffffff"        # พื้นผิวการ์ด/พรีวิว (Layer)
+COL_TEXT = "#1b1b1b"        # ข้อความหลัก
+COL_MUTED = "#5c5c5c"       # ข้อความรอง
+COL_BORDER = "#e5e5e5"      # เส้นขอบบาง (card stroke)
+COL_FIELD = "#fbfbfb"       # พื้นช่องกรอก (control fill)
+COL_ROW_ALT = "#fafafa"     # แถวสลับในตาราง
+COL_BTN_BORDER = "#d6d6d6"  # ขอบปุ่มรอง / ขอบคอนโทรล
 
-# สีเน้น (accent) — ใช้สีเดียวทั้งโปรแกรม
-COL_ACCENT = "#2563eb"
-COL_ACCENT_HOVER = "#1d4ed8"
-COL_ACCENT_ACTIVE = "#1e40af"
-COL_ACCENT_SOFT = "#eff4ff"
+# สีเน้น (accent) — Windows 11 default blue
+COL_ACCENT = "#0067C0"
+COL_ACCENT_HOVER = "#1975C5"
+COL_ACCENT_ACTIVE = "#005BA1"
+COL_ACCENT_SOFT = "#e6f1fb"
 
-COL_HEADER = "#ffffff"      # แถบหัวโทนสว่าง
+COL_HEADER = "#f3f3f3"      # แถบหัวกลืนกับพื้น Mica (Win11 title strip)
+
+
+def _round_pts(x1, y1, x2, y2, r):
+    """จุดสำหรับวาดสี่เหลี่ยมมุมโค้งบน Canvas (ใช้กับ create_polygon smooth=True)"""
+    r = max(0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
+    return [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+
+
+class Segmented(tk.Canvas):
+    """ตัวควบคุมแบบ segmented (pill) สไตล์ Fluent/Win11 — ผูกกับ StringVar
+    options = [(value, label), ...] · แบ่งช่องเท่ากันเต็มความกว้าง"""
+
+    def __init__(self, parent, variable, options, command=None, font=None, height=28):
+        self._var = variable
+        self._opts = options
+        self._cmd = command
+        self._font = tkfont.Font(font=font) if font else tkfont.nametofont("TkDefaultFont")
+        self._h = height
+        # ความกว้างขั้นต่ำจากข้อความ + ระยะขอบ
+        minw = sum(self._font.measure(lbl) + 28 for _, lbl in options) + 6
+        super().__init__(parent, height=height, width=minw,
+                         highlightthickness=0, bg=COL_CARD, bd=0)
+        self.bind("<Button-1>", self._click)
+        self.bind("<Configure>", lambda e: self._redraw())
+        self._trace = self._var.trace_add("write", lambda *a: self._redraw())
+        self._redraw()
+
+    def _seg_index(self):
+        cur = self._var.get()
+        for i, (v, _) in enumerate(self._opts):
+            if v == cur:
+                return i
+        return 0
+
+    def _click(self, e):
+        n = len(self._opts)
+        w = self.winfo_width()
+        idx = min(int(e.x / (w / n)), n - 1)
+        v = self._opts[idx][0]
+        if v != self._var.get():
+            self._var.set(v)          # trace -> _redraw
+        if self._cmd:
+            self._cmd()
+
+    def _redraw(self):
+        self.delete("all")
+        w, h = self.winfo_width(), self._h
+        if w <= 1:
+            return
+        n = len(self._opts)
+        # ราง (track) พื้น control-fill ขอบบาง
+        self.create_polygon(_round_pts(1, 1, w - 1, h - 1, (h - 2) / 2),
+                            smooth=True, fill=COL_FIELD, outline="#e0e0e0", width=1)
+        seg_w = w / n
+        active = self._seg_index()
+        pad = 3
+        for i, (_, lbl) in enumerate(self._opts):
+            cx = seg_w * (i + 0.5)
+            if i == active:
+                x1, x2 = seg_w * i + pad, seg_w * (i + 1) - pad
+                # ตัวเลือกที่เลือก: thumb ขาวมุมโค้ง + ขอบจาง (ลอยเหมือน Fluent)
+                self.create_polygon(_round_pts(x1, pad, x2, h - pad, (h - 2 * pad) / 2),
+                                    smooth=True, fill="#ffffff", outline="#d4d4d4", width=1)
+                self.create_text(cx, h / 2, text=lbl, fill=COL_TEXT,
+                                 font=(self._font.actual("family"), self._font.actual("size"), "bold"))
+            else:
+                self.create_text(cx, h / 2, text=lbl, fill=COL_MUTED,
+                                 font=(self._font.actual("family"), self._font.actual("size")))
+
+
+class ToggleSwitch(tk.Canvas):
+    """สวิตช์เปิด/ปิดสไตล์ Fluent/Win11 — ผูกกับ BooleanVar"""
+
+    def __init__(self, parent, variable, command=None, w=38, h=20):
+        # หมายเหตุ: ห้ามใช้ self._w (tkinter จองไว้เป็น path ของ widget) จึงใช้ _sw/_sh
+        super().__init__(parent, width=w, height=h, highlightthickness=0, bg=COL_CARD, bd=0)
+        self._var = variable
+        self._cmd = command
+        self._sw, self._sh = w, h
+        self.bind("<Button-1>", self._toggle)
+        self._var.trace_add("write", lambda *a: self._redraw())
+        self.configure(cursor="hand2")
+        self._redraw()
+
+    def _toggle(self, _e):
+        self._var.set(not self._var.get())   # trace -> _redraw
+        if self._cmd:
+            self._cmd()
+
+    def _redraw(self):
+        self.delete("all")
+        on = bool(self._var.get())
+        w, h = self._sw, self._sh
+        r = h / 2
+        track = COL_ACCENT if on else COL_FIELD
+        outline = COL_ACCENT if on else "#8a8a8a"
+        self.create_polygon(_round_pts(1, 1, w - 1, h - 1, r - 1),
+                            smooth=True, fill=track, outline=outline, width=1)
+        kr = h * 0.30 if not on else h * 0.34
+        cy = h / 2
+        cx = (w - r) if on else r
+        knob = "#ffffff" if on else "#5c5c5c"
+        self.create_oval(cx - kr, cy - kr, cx + kr, cy + kr, fill=knob, outline="")
+
+
+class Collapsible(tk.Frame):
+    """หมวดพับเก็บได้ (accordion) สไตล์ Fluent — คลิกหัวข้อเพื่อกาง/พับ
+    ใส่เนื้อหาลงใน .body  (เป็น ttk.Frame ที่ pack/grid ได้ตามปกติ)"""
+
+    def __init__(self, parent, title, expanded=True):
+        super().__init__(parent, bg=COL_CARD, highlightbackground=COL_BORDER,
+                         highlightthickness=1, bd=0)
+        self._expanded = bool(expanded)
+        head = tk.Frame(self, bg=COL_CARD, cursor="hand2")
+        head.pack(fill="x")
+        self._chev = tk.Label(head, text=("▾" if self._expanded else "▸"),
+                              bg=COL_CARD, fg=COL_ACCENT, font=(HEAD_FAMILY, 11, "bold"))
+        self._chev.pack(side="left", padx=(10, 6), pady=7)
+        tk.Label(head, text=title, bg=COL_CARD, fg=COL_TEXT,
+                 font=(HEAD_FAMILY, 11, "bold")).pack(side="left", pady=7)
+        # เนื้อหา: ใส่ widget ลงใน .body
+        self.body = ttk.Frame(self, style="TFrame", padding=(10, 0, 10, 10))
+        if self._expanded:
+            self.body.pack(fill="both", expand=True)
+        # คลิกที่ส่วนหัวส่วนไหนก็ได้ -> สลับกาง/พับ
+        for w in [head] + list(head.winfo_children()):
+            w.bind("<Button-1>", lambda e: self.toggle())
+
+    def toggle(self):
+        self._expanded = not self._expanded
+        self._chev.configure(text="▾" if self._expanded else "▸")
+        if self._expanded:
+            self.body.pack(fill="both", expand=True)
+        else:
+            self.body.pack_forget()
 
 
 class App(tk.Tk):
@@ -124,13 +260,13 @@ class App(tk.Tk):
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         header_h = self.header.winfo_reqheight()
         footer_h = self.footer.winfo_reqheight()
-        body = max(left_need, 460)                 # เผื่อพื้นที่พรีวิวด้วย
-        desired = header_h + body + footer_h + 40  # เผื่อ padding ต่าง ๆ
+        body = max(left_need, 420)                 # เผื่อพื้นที่พรีวิวด้วย
+        desired = header_h + body + footer_h + 32  # เผื่อ padding ต่าง ๆ
         avail = sh - 96                            # เผื่อแถบชื่อ + taskbar
-        h = max(min(desired, avail), 520)
-        w = min(1200, sw - 40)
+        h = max(min(desired, avail), 470)
+        w = min(1110, sw - 40)
         x = max((sw - w) // 2, 0)
-        self.minsize(900, 520)
+        self.minsize(800, 470)
         self.resizable(True, True)                 # ปรับขนาดได้ + ซ้ายเลื่อนได้ -> ไม่มีล้นจอ
         self.geometry(f"{w}x{h}+{x}+8")            # ชิดด้านบนของจอ
 
@@ -160,16 +296,16 @@ class App(tk.Tk):
         global FONT_FAMILY, HEAD_FAMILY, UI_FONT, UI_FONT_BOLD, TITLE_FONT, SMALL_FONT
         FONT_FAMILY = self._pick_font(BODY_PREFS)
         HEAD_FAMILY = self._pick_font(HEAD_PREFS)
-        UI_FONT = (FONT_FAMILY, 11)
-        UI_FONT_BOLD = (FONT_FAMILY, 11, "bold")
-        TITLE_FONT = (HEAD_FAMILY, 16, "bold")
-        SMALL_FONT = (FONT_FAMILY, 9)
+        UI_FONT = (FONT_FAMILY, 10)
+        UI_FONT_BOLD = (FONT_FAMILY, 10, "bold")
+        TITLE_FONT = (HEAD_FAMILY, 14, "bold")
+        SMALL_FONT = (FONT_FAMILY, 8)
 
         # ฟอนต์เริ่มต้นของ Tk (กล่องข้อความ/เมนู) ใช้ฟอนต์เนื้อหา
         for fname in ("TkDefaultFont", "TkTextFont", "TkMenuFont",
                       "TkHeadingFont", "TkTooltipFont", "TkIconFont"):
             try:
-                tkfont.nametofont(fname).configure(family=FONT_FAMILY, size=10)
+                tkfont.nametofont(fname).configure(family=FONT_FAMILY, size=9)
             except tk.TclError:
                 pass
 
@@ -181,7 +317,7 @@ class App(tk.Tk):
 
         self.configure(bg=COL_BG)
         # ค่าตั้งต้น: พื้นผิวเป็นการ์ดสีขาว (ส่วนโครงสร้างที่ต้องเป็นพื้นเทาใช้สไตล์ Surface.*)
-        style.configure(".", font=(FONT_FAMILY, 11), background=COL_CARD, foreground=COL_TEXT)
+        style.configure(".", font=(FONT_FAMILY, 10), background=COL_CARD, foreground=COL_TEXT)
         style.configure("TFrame", background=COL_CARD)
         style.configure("TLabel", background=COL_CARD, foreground=COL_TEXT)
         # พื้นผิวโครงสร้าง (พื้นเทาอ่อน) สำหรับนอกการ์ด
@@ -191,12 +327,12 @@ class App(tk.Tk):
         # การ์ด = กรอบขาว เส้นขอบบาง หัวข้อใช้ฟอนต์หัวข้อ (Kanit) สีเน้น
         style.configure("TLabelframe", background=COL_CARD, bordercolor=COL_BORDER,
                         relief="solid", borderwidth=1)
-        style.configure("TLabelframe.Label", background=COL_CARD, foreground=COL_ACCENT,
-                        font=(HEAD_FAMILY, 12, "bold"))
+        style.configure("TLabelframe.Label", background=COL_CARD, foreground=COL_TEXT,
+                        font=(HEAD_FAMILY, 11, "bold"))
 
         # เรดิโอ: ชี้แล้วตัวอักษรเป็นสีเน้น จุดเลือกเป็นสีเน้น
         style.configure("TRadiobutton", background=COL_CARD, foreground=COL_TEXT,
-                        font=(FONT_FAMILY, 11))
+                        font=(FONT_FAMILY, 10))
         style.map("TRadiobutton",
                   background=[("active", COL_CARD)],
                   foreground=[("active", COL_ACCENT)],
@@ -204,7 +340,7 @@ class App(tk.Tk):
 
         # เช็กบ็อกซ์: ติ๊กแล้วกล่องเป็นสีเน้น (เครื่องหมายถูกสีขาวบนพื้นสีเน้น) ไม่ติ๊ก=กล่องขาว
         style.configure("TCheckbutton", background=COL_CARD, foreground=COL_TEXT,
-                        font=(FONT_FAMILY, 11), focuscolor=COL_CARD,
+                        font=(FONT_FAMILY, 10), focuscolor=COL_CARD,
                         indicatorforeground="white")
         style.map("TCheckbutton",
                   background=[("active", COL_CARD)],
@@ -218,7 +354,7 @@ class App(tk.Tk):
         # ช่องกรอก: พื้นขาว ขอบบาง โฟกัสแล้วขอบเป็นสีเน้น
         style.configure("TEntry", fieldbackground=COL_FIELD, foreground=COL_TEXT,
                         bordercolor=COL_BTN_BORDER, relief="solid", borderwidth=1,
-                        padding=(6, 5))
+                        padding=(6, 4))
         style.map("TEntry",
                   bordercolor=[("focus", COL_ACCENT)],
                   lightcolor=[("focus", COL_ACCENT)],
@@ -226,12 +362,12 @@ class App(tk.Tk):
         style.configure("TCombobox", fieldbackground=COL_FIELD)
 
         # ตาราง: แถวสูงขึ้น หัวตารางใช้ฟอนต์หัวข้อ (Kanit) เลือกแถวเป็นสีเน้นอ่อน
-        style.configure("Treeview", font=(FONT_FAMILY, 11), rowheight=27,
+        style.configure("Treeview", font=(FONT_FAMILY, 10), rowheight=23,
                         fieldbackground=COL_CARD, background=COL_CARD,
                         foreground=COL_TEXT, borderwidth=0)
-        style.configure("Treeview.Heading", font=(HEAD_FAMILY, 11, "bold"),
+        style.configure("Treeview.Heading", font=(HEAD_FAMILY, 10, "bold"),
                         background=COL_BG, foreground=COL_TEXT,
-                        relief="flat", padding=(8, 7))
+                        relief="flat", padding=(6, 5))
         style.map("Treeview.Heading", background=[("active", COL_ACCENT_SOFT)])
         style.map("Treeview",
                   background=[("selected", COL_ACCENT_SOFT)],
@@ -244,8 +380,8 @@ class App(tk.Tk):
             style.map(sb, background=[("active", COL_BTN_BORDER)])
 
         # ปุ่มรอง (ค่าเริ่มต้น): ขาว ขอบบาง ชี้แล้วเป็นฟ้าอ่อน + ตัวอักษรสีเน้น
-        for sname, pad in (("TButton", (10, 8)), ("Secondary.TButton", (10, 9))):
-            style.configure(sname, font=(FONT_FAMILY, 11, "bold"), padding=pad,
+        for sname, pad in (("TButton", (8, 6)), ("Secondary.TButton", (8, 6))):
+            style.configure(sname, font=(FONT_FAMILY, 10, "bold"), padding=pad,
                             background=COL_CARD, foreground=COL_TEXT,
                             bordercolor=COL_BTN_BORDER, focuscolor=COL_CARD,
                             relief="solid", borderwidth=1)
@@ -256,7 +392,7 @@ class App(tk.Tk):
                       bordercolor=[("active", COL_ACCENT), ("disabled", COL_BORDER)])
 
         # ปุ่มเลื่อนพรีวิว ◀ ▶ : กะทัดรัด สีเน้น
-        style.configure("Nav.TButton", font=(FONT_FAMILY, 11, "bold"), padding=(6, 2),
+        style.configure("Nav.TButton", font=(FONT_FAMILY, 10, "bold"), padding=(5, 1),
                         background=COL_CARD, foreground=COL_ACCENT,
                         bordercolor=COL_BORDER, focuscolor=COL_CARD,
                         relief="solid", borderwidth=1)
@@ -265,7 +401,7 @@ class App(tk.Tk):
                   foreground=[("active", COL_ACCENT_ACTIVE), ("disabled", "#9aa6b8")])
 
         # ปุ่มหลัก (CTA): ทึบสีเน้น
-        style.configure("Primary.TButton", font=(FONT_FAMILY, 12, "bold"), padding=(10, 10),
+        style.configure("Primary.TButton", font=(FONT_FAMILY, 11, "bold"), padding=(8, 7),
                         background=COL_ACCENT, foreground="white",
                         bordercolor=COL_ACCENT, focuscolor=COL_ACCENT, relief="flat")
         style.map("Primary.TButton",
@@ -470,20 +606,27 @@ class App(tk.Tk):
         self._set_status(f"วาง {len(rows)} รายการแล้ว", "#080")
 
     # ------------------------------------------------------------------ UI
+    def _card(self, parent, title, **kw):
+        """การ์ด (LabelFrame) หัวข้อชื่อสีเข้ม แบบ Fluent (ไม่มีไอคอนนำหน้า)"""
+        lf = ttk.LabelFrame(parent, padding=9, **kw)
+        head = ttk.Frame(lf)
+        ttk.Label(head, text=title, foreground=COL_TEXT,
+                  font=(HEAD_FAMILY, 11, "bold")).pack(side="left")
+        lf.configure(labelwidget=head)
+        return lf
+
     def _build_ui(self):
         # ---- แถบหัวโปรแกรม (สว่าง + เส้นคั่นบาง) ----
         header = tk.Frame(self, bg=COL_HEADER)
         self.header = header
         header.pack(fill="x", side="top")
-        tk.Label(header, text="▲", bg=COL_HEADER, fg=COL_ACCENT,
-                 font=(HEAD_FAMILY, 18, "bold")).pack(side="left", padx=(18, 8), pady=12)
         tk.Label(header, text="สร้างป้ายสามเหลี่ยม", bg=COL_HEADER, fg=COL_TEXT,
-                 font=(HEAD_FAMILY, 18, "bold")).pack(side="left", pady=12)
+                 font=(HEAD_FAMILY, 15, "bold")).pack(side="left", padx=(14, 0), pady=8)
         tk.Label(header, text=f"Mail Merge · v{APP_VERSION}", bg=COL_HEADER, fg=COL_MUTED,
-                 font=(FONT_FAMILY, 10)).pack(side="right", padx=18)
+                 font=(FONT_FAMILY, 9)).pack(side="right", padx=14)
         tk.Frame(self, bg=COL_BORDER, height=1).pack(fill="x", side="top")  # เส้นคั่นใต้หัว
 
-        root = ttk.Frame(self, padding=12, style="Surface.TFrame")
+        root = ttk.Frame(self, padding=9, style="Surface.TFrame")
         root.pack(fill="both", expand=True)
         root.columnconfigure(0, weight=0, minsize=430)
         root.columnconfigure(1, weight=1)
@@ -491,7 +634,7 @@ class App(tk.Tk):
 
         # คอลัมน์ซ้ายห่อด้วยพื้นที่เลื่อนแนวตั้ง (กันเนื้อหาล้นจอบนหน้าจอเล็ก)
         left_container, left = self._make_scroll_column(root, width=430)
-        left_container.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        left_container.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
         self._left_inner = left
         right = ttk.Frame(root, style="Surface.TFrame")
         right.grid(row=0, column=1, sticky="nsew")
@@ -501,70 +644,75 @@ class App(tk.Tk):
         footer = ttk.Frame(root, style="Surface.TFrame")
         self.footer = footer
         footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        # ขวา: เวอร์ชัน + ผู้สร้าง | ซ้าย: สถานะการทำงาน (status bar)
+        # ขวา: เวอร์ชัน + ผู้สร้าง | ซ้าย: ไอคอนสถานะ + ข้อความ (status bar)
         ttk.Label(footer, text=f"v{APP_VERSION} · {CREATOR}",
                   style="Surface.TLabel", font=SMALL_FONT).pack(side="right")
+        self.status_dot = tk.Label(footer, text="●", bg=COL_BG, fg="#2da44e",
+                                   font=(FONT_FAMILY, 9))
+        self.status_dot.pack(side="left", padx=(0, 5))
         self.status = ttk.Label(footer, text="พร้อมใช้งาน", style="Surface.TLabel", font=UI_FONT_BOLD)
         self.status.pack(side="left")
 
         # ---- ซ้าย: ตัวควบคุม ----
-        # แบบป้าย
-        tf = ttk.LabelFrame(left, text=" แบบป้าย ", padding=12)
-        tf.pack(fill="x")
-        ttk.Radiobutton(tf, text=me.TYPE_LABELS[me.TYPE1], value=me.TYPE1,
-                        variable=self.template_type, command=self._refresh_visibility).pack(anchor="w", pady=2)
-        ttk.Radiobutton(tf, text=me.TYPE_LABELS[me.TYPE2], value=me.TYPE2,
-                        variable=self.template_type, command=self._refresh_visibility).pack(anchor="w", pady=2)
+        # [A] แถบเลือกแบบ + โหมด (กะทัดรัด) — segmented 2 แถวในการ์ดเดียว
+        bar = tk.Frame(left, bg=COL_CARD, highlightbackground=COL_BORDER,
+                       highlightthickness=1, bd=0)
+        bar.pack(fill="x")
+        self.mf = bar
+        barin = ttk.Frame(bar, style="TFrame", padding=10)
+        barin.pack(fill="x")
+        Segmented(barin, self.template_type,
+                  [(me.TYPE1, "แบบ 1 · ชื่อ+ตำแหน่ง"), (me.TYPE2, "แบบ 2 · ชื่อ")],
+                  command=self._refresh_visibility, font=UI_FONT).pack(fill="x")
+        Segmented(barin, self.mode,
+                  [("single", "รายคน"), ("batch", "นำเข้ารายชื่อ (Excel/CSV)")],
+                  command=self._refresh_visibility, font=UI_FONT).pack(fill="x", pady=(8, 0))
 
-        # โหมด
-        mf = ttk.LabelFrame(left, text=" โหมด ", padding=12)
-        mf.pack(fill="x", pady=(10, 0))
-        self.mf = mf
-        ttk.Radiobutton(mf, text="ทีละคน", value="single",
-                        variable=self.mode, command=self._refresh_visibility).pack(side="left", padx=(0, 16))
-        ttk.Radiobutton(mf, text="นำเข้ารายชื่อ (Excel/CSV)", value="batch",
-                        variable=self.mode, command=self._refresh_visibility).pack(side="left")
-
-        # ---- ฟอร์มทีละคน ----
-        self.single_frame = ttk.LabelFrame(left, text=" ข้อมูล ", padding=12)
+        # ---- [B] ฟอร์มรายคน (หมวดกางเสมอ) ----
+        self.single_frame = Collapsible(left, "ข้อมูล", expanded=True)
         self.single_frame.pack(fill="x", pady=(10, 0))
+        body = self.single_frame.body
 
-        ttk.Label(self.single_frame, text="ชื่อ", font=UI_FONT_BOLD).grid(row=0, column=0, sticky="w", pady=4)
-        self.e_name = ttk.Entry(self.single_frame, font=UI_FONT, width=34)
+        ttk.Label(body, text="ชื่อ", font=UI_FONT_BOLD).grid(row=0, column=0, sticky="w", pady=4)
+        self.e_name = ttk.Entry(body, font=UI_FONT, width=34)
         self.e_name.grid(row=0, column=1, sticky="ew", pady=4)
         # พิมพ์ชื่อ -> เปิด/ปิดปุ่มสร้างตามว่ามีข้อมูลหรือยัง
         self.e_name.bind("<KeyRelease>", lambda e: self._refresh_buttons())
 
-        self.lbl_pos = ttk.Label(self.single_frame, text="ตำแหน่ง", font=UI_FONT_BOLD)
+        self.lbl_pos = ttk.Label(body, text="ตำแหน่ง", font=UI_FONT_BOLD)
         self.lbl_pos.grid(row=1, column=0, sticky="w", pady=4)
-        self.e_pos = ttk.Entry(self.single_frame, font=UI_FONT, width=34)
+        self.e_pos = ttk.Entry(body, font=UI_FONT, width=34)
         self.e_pos.grid(row=1, column=1, sticky="ew", pady=4)
 
-        self.lbl_org = ttk.Label(self.single_frame, text="หน่วยงาน", font=UI_FONT_BOLD)
+        self.lbl_org = ttk.Label(body, text="หน่วยงาน", font=UI_FONT_BOLD)
         self.lbl_org.grid(row=2, column=0, sticky="w", pady=4)
-        self.e_org = ttk.Entry(self.single_frame, font=UI_FONT, width=34)
+        self.e_org = ttk.Entry(body, font=UI_FONT, width=34)
         self.e_org.grid(row=2, column=1, sticky="ew", pady=4)
-        self.single_frame.columnconfigure(1, weight=1)
+        body.columnconfigure(1, weight=1)
 
         # ---- ฟอร์ม batch ----
-        self.batch_frame = ttk.LabelFrame(left, text=" รายชื่อ ", padding=12)
+        self.batch_frame = self._card(left, "รายชื่อ")
         # (pack/forget ใน _refresh_visibility)
         topb = ttk.Frame(self.batch_frame)
         topb.pack(fill="x")
         ttk.Button(topb, text="📂 Choose Excel/CSV…", command=self._choose_list).pack(side="left")
+        # ไอคอนวิธีใช้ (ⓘ) — hover เพื่อดูคำอธิบายแบบ tooltip (แทนบรรทัดข้อความยาว)
+        info = tk.Label(topb, text="ⓘ", bg=COL_CARD, fg=COL_ACCENT,
+                        font=(HEAD_FAMILY, 13), cursor="hand2")
+        info.pack(side="right")
+        self._attach_tooltip(
+            info, "ดับเบิลคลิกเพื่อแก้ในช่อง · Ctrl+C คัดลอก · Ctrl+V วางจาก Excel · Del ลบแถว")
         self.lbl_batch = ttk.Label(topb, text="ยังไม่ได้เลือกไฟล์", font=UI_FONT)
         self.lbl_batch.pack(side="left", padx=10)
 
-        tk.Label(self.batch_frame, bg=COL_CARD, fg=COL_MUTED, font=SMALL_FONT, justify="left",
-                 text="ดับเบิลคลิกเพื่อแก้ในช่อง · Ctrl+C คัดลอก · Ctrl+V วางจาก Excel · Del ลบแถว"
-                 ).pack(anchor="w", pady=(6, 0))
         cols = ("name", "position", "org")
         treewrap = ttk.Frame(self.batch_frame)
         treewrap.pack(fill="both", expand=True, pady=(2, 6))
         self.tree = ttk.Treeview(treewrap, columns=cols, show="headings", height=5)
-        for c, t, w in (("name", "ชื่อ", 150), ("position", "ตำแหน่ง", 110), ("org", "หน่วยงาน", 120)):
+        # ความกว้างคอลัมน์รวม ≤ พื้นที่การ์ด (กันล้นกล่อง) + ยืดเติมช่องว่างได้
+        for c, t, w in (("name", "ชื่อ", 134), ("position", "ตำแหน่ง", 124), ("org", "หน่วยงาน", 130)):
             self.tree.heading(c, text=t)
-            self.tree.column(c, width=w, anchor="w")
+            self.tree.column(c, width=w, minwidth=60, anchor="w", stretch=True)
         self.tree.tag_configure("odd", background=COL_CARD)
         self.tree.tag_configure("even", background=COL_ROW_ALT)
         vsb = ttk.Scrollbar(treewrap, orient="vertical", command=self.tree.yview)
@@ -575,34 +723,47 @@ class App(tk.Tk):
         # คัดลอก/วาง/ลบ ในตาราง (รองรับทั้งคีย์บอร์ดไทยและอังกฤษผ่าน keycode)
         self.tree.bind("<Control-KeyPress>", self._tree_key)
         self.tree.bind("<Delete>", lambda e: (self._delete_selected(), "break")[1])
+        # tooltip: เลื่อนเมาส์ไปช่องที่ข้อความยาวเกิน -> โชว์ข้อความเต็ม
+        self._tip = None
+        self._tip_cell = None
+        self._tree_font = tkfont.nametofont("TkDefaultFont")
+        self.tree.bind("<Motion>", self._tree_tip_motion)
+        self.tree.bind("<Leave>", lambda e: self._hide_tip())
 
-        # ปุ่มเพิ่ม/ลบรายชื่อ
+        # ปุ่มเพิ่ม/ลบรายชื่อ — กริด 2 แถว ให้พอดีความกว้าง ไม่ล้นกล่อง
         editbar = ttk.Frame(self.batch_frame)
         editbar.pack(fill="x", pady=(0, 6))
-        ttk.Button(editbar, text="➕ เพิ่มคน", command=self._add_person).pack(side="left")
-        ttk.Button(editbar, text="🗑 ลบที่เลือก", command=self._delete_selected).pack(side="left", padx=6)
-        ttk.Button(editbar, text="🧹 ล้างทั้งหมด", command=self._clear_all).pack(side="right")
+        editbar.columnconfigure(0, weight=1)
+        editbar.columnconfigure(1, weight=1)
+        ttk.Button(editbar, text="➕ เพิ่มคน", command=self._add_person
+                   ).grid(row=0, column=0, sticky="ew", padx=(0, 3), pady=(0, 3))
+        ttk.Button(editbar, text="🗑 ลบที่เลือก", command=self._delete_selected
+                   ).grid(row=0, column=1, sticky="ew", padx=(3, 0), pady=(0, 3))
+        ttk.Button(editbar, text="🧹 ล้างทั้งหมด", command=self._clear_all
+                   ).grid(row=1, column=0, columnspan=2, sticky="ew")
 
         ob = ttk.Frame(self.batch_frame)
         ob.pack(fill="x")
-        ttk.Radiobutton(ob, text="รวมไฟล์เดียว", value="combined",
-                        variable=self.batch_output).pack(side="left", padx=(0, 14))
-        ttk.Radiobutton(ob, text="แยกไฟล์ต่อคน", value="separate",
-                        variable=self.batch_output).pack(side="left")
+        Segmented(ob, self.batch_output,
+                  [("combined", "รวมไฟล์เดียว"), ("separate", "แยกไฟล์ต่อคน")],
+                  font=UI_FONT).pack(fill="x")
 
-        # ---- โลโก้/ตรา (รูปเดียว ใช้กับทุกป้าย ทั้งสองโหมด) ----
-        lf = ttk.LabelFrame(left, text=" โลโก้/ตรา ", padding=12)
-        lf.pack(fill="x", pady=(10, 0))
+        # ---- [C] โลโก้/ตรา (หมวดพับเก็บ default · รูปเดียว ใช้กับทุกป้าย ทั้งสองโหมด) ----
+        self.sec_logo = Collapsible(left, "โลโก้/ตรา", expanded=False)
+        self.sec_logo.pack(fill="x", pady=(10, 0))
+        lf = self.sec_logo.body
 
         rowf = ttk.Frame(lf)
         rowf.pack(fill="x")
-        ttk.Checkbutton(rowf, text=" ใส่โลโก้", style=self._logo_cb_style,
-                        variable=self.logo_enabled,
-                        command=self._on_logo_toggle).pack(side="left")
-        ttk.Button(rowf, text="🖼 เลือกรูป…", command=self._choose_logo).pack(side="left", padx=(8, 4))
-        ttk.Button(rowf, text="ลบรูป", command=self._clear_logo).pack(side="left")
+        ttk.Label(rowf, text="ใส่โลโก้บนป้าย", font=UI_FONT).pack(side="left")
+        ToggleSwitch(rowf, self.logo_enabled, command=self._on_logo_toggle).pack(side="right")
+
+        rowf2 = ttk.Frame(lf)
+        rowf2.pack(fill="x", pady=(8, 0))
+        ttk.Button(rowf2, text="🖼 เลือกรูป…", command=self._choose_logo).pack(side="left", padx=(0, 6))
+        ttk.Button(rowf2, text="ลบรูป", command=self._clear_logo).pack(side="left")
         self.lbl_logo = ttk.Label(lf, text="ยังไม่ได้เลือกรูป", font=SMALL_FONT, foreground=COL_MUTED)
-        self.lbl_logo.pack(anchor="w", pady=(6, 4))
+        self.lbl_logo.pack(anchor="w", pady=(8, 4))
 
         grid = ttk.Frame(lf)
         grid.pack(fill="x")
@@ -641,7 +802,7 @@ class App(tk.Tk):
         bf.pack(fill="x", pady=(12, 0))
         bf.columnconfigure(0, weight=1)
         bf.columnconfigure(1, weight=1)
-        self.btn_preview = ttk.Button(bf, text="🔍  Preview", style="Primary.TButton",
+        self.btn_preview = ttk.Button(bf, text="🔍  แสดงตัวอย่าง", style="Primary.TButton",
                                       command=self._on_preview)
         self.btn_save = ttk.Button(bf, text="💾  Save .docx", style="Secondary.TButton",
                                    command=self._on_save)
@@ -657,8 +818,8 @@ class App(tk.Tk):
         self.btn_pdf.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=3)
         self.btn_print.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=3)
 
-        # ---- ขวา: พรีวิว ----
-        pv = ttk.LabelFrame(right, text=" พรีวิว ", padding=12)
+        # ---- ขวา: แสดงตัวอย่าง ----
+        pv = self._card(right, "แสดงตัวอย่าง")
         pv.pack(fill="both", expand=True)
 
         # แถบเลื่อนดู (เฉพาะโหมดนำเข้ารายชื่อ)
@@ -674,14 +835,34 @@ class App(tk.Tk):
 
         self.canvas = tk.Canvas(pv, background=COL_CARD, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
-        self.canvas.create_text(
-            14, 14, anchor="nw", fill=COL_MUTED, font=UI_FONT,
-            text="กรอกข้อมูลแล้วกดปุ่ม \"Preview\" เพื่อดูภาพป้ายก่อนบันทึก",
-        )
+        # วาด empty-state เมื่อยังไม่มีภาพ + จัดให้อยู่กึ่งกลางเสมอเมื่อปรับขนาด
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self._draw_placeholder()
 
         # ปุ่มที่ต้องปิดระหว่างทำงาน
         self._busy_buttons = [self.btn_preview, self.btn_save, self.btn_open,
                               self.btn_pdf, self.btn_print, self.btn_prev, self.btn_next]
+
+    def _on_canvas_configure(self, _e=None):
+        """วาด empty-state ใหม่ให้อยู่กึ่งกลางเมื่อปรับขนาด (เฉพาะตอนยังไม่มีภาพ/ไม่ได้ทำงาน)"""
+        if self._preview_img is None and not self.busy:
+            self._draw_placeholder()
+
+    def _draw_placeholder(self):
+        """วาดสถานะว่าง (empty-state) สไตล์ Fluent: ข้อความล้วน จัดกึ่งกลางแผง"""
+        c = self.canvas
+        c.delete("all")
+        self._preview_img = None
+        w = c.winfo_width() or 560
+        h = c.winfo_height() or 400
+        cx, cy = w / 2, h / 2
+        c.create_text(cx, cy - 18, text="ยังไม่มีตัวอย่าง", fill=COL_TEXT,
+                      font=(HEAD_FAMILY, 12, "bold"))
+        # แยกเป็น 2 บรรทัดชัดเจน + เว้นระยะบรรทัดให้พอ (กันสระ/วรรณยุกต์ไทยซ้อนทับ)
+        c.create_text(cx, cy + 8, justify="center", fill=COL_MUTED, font=UI_FONT,
+                      text="กรอกข้อมูลแล้วกดปุ่ม “แสดงตัวอย่าง”")
+        c.create_text(cx, cy + 30, justify="center", fill=COL_MUTED, font=UI_FONT,
+                      text="เพื่อดูภาพป้ายก่อนบันทึก")
 
     def _refresh_visibility(self):
         is_t1 = self.template_type.get() == me.TYPE1
@@ -715,8 +896,56 @@ class App(tk.Tk):
         if not ok_word:
             self._set_status("ไม่พบ pywin32/Word — ใช้ได้เฉพาะบันทึก .docx", "#a00")
         elif not ok_fitz:
-            self._set_status("ไม่พบ PyMuPDF — พรีวิวรูปปิดอยู่ (ฟีเจอร์อื่นใช้ได้)", "#a60")
+            self._set_status("ไม่พบ PyMuPDF — การแสดงตัวอย่างรูปปิดอยู่ (ฟีเจอร์อื่นใช้ได้)", "#a60")
         self._refresh_buttons()
+
+    # ----------------------------------------------------- tooltip ตาราง
+    def _tree_tip_motion(self, e):
+        """โชว์ tooltip ข้อความเต็ม เมื่อชี้ช่องที่ข้อความถูกตัด (กว้างเกินคอลัมน์)"""
+        row = self.tree.identify_row(e.y)
+        col = self.tree.identify_column(e.x)   # '#1'..'#3' ('' ถ้าอยู่นอกช่อง)
+        if not row or not col:
+            self._hide_tip()
+            return
+        if (row, col) == self._tip_cell and self._tip is not None:
+            return
+        self._hide_tip()
+        try:
+            idx = int(col[1:]) - 1
+            vals = self.tree.item(row, "values")
+            text = str(vals[idx]) if 0 <= idx < len(vals) else ""
+        except (ValueError, IndexError):
+            return
+        if not text.strip():
+            return
+        # โชว์เฉพาะตอนข้อความกว้างเกินคอลัมน์ (ถ้าพอดีก็ไม่กวน)
+        col_w = self.tree.column(self.tree["columns"][idx], "width")
+        if self._tree_font.measure(text) <= col_w - 10:
+            return
+        self._tip_cell = (row, col)
+        self._show_tip(e.x_root + 14, e.y_root + 18, text)
+
+    def _attach_tooltip(self, widget, text):
+        """ผูก tooltip กับ widget ใดๆ: hover เข้า -> โชว์ข้อความ, ออก -> ซ่อน"""
+        def show(e):
+            self._hide_tip()
+            self._show_tip(e.x_root + 14, e.y_root + 18, text)
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", lambda e: self._hide_tip())
+
+    def _show_tip(self, x, y, text):
+        self._tip = tk.Toplevel(self)
+        self._tip.wm_overrideredirect(True)
+        self._tip.attributes("-topmost", True)   # ลอยเหนือหน้าต่างเสมอ
+        self._tip.wm_geometry(f"+{int(x)}+{int(y)}")
+        tk.Label(self._tip, text=text, bg="#ffffe1", fg=COL_TEXT, font=SMALL_FONT,
+                 relief="solid", borderwidth=1, padx=7, pady=4, justify="left").pack()
+
+    def _hide_tip(self):
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
+        self._tip_cell = None
 
     def _has_input(self):
         """ฟอร์มมีข้อมูลพอจะสร้างป้ายไหม (กันสร้างจากฟอร์มว่าง)"""
@@ -749,6 +978,9 @@ class App(tk.Tk):
     # ------------------------------------------------------------- helpers
     def _set_status(self, text, color="#246"):
         self.status.configure(text=text, foreground=color)
+        # ไอคอนจุดสถานะ: แดง=ข้อผิดพลาด · ส้ม=เตือน · เขียว=พร้อม/ปกติ
+        dot = {"#a00": "#d13438", "#a60": "#f7630c"}.get(color, "#2da44e")
+        self.status_dot.configure(fg=dot)
 
     # ----------------------------------------------------------- โลโก้/ตรา
     def _on_logo_toggle(self):
@@ -951,7 +1183,7 @@ class App(tk.Tk):
         try:
             self._precheck()
         except Exception as e:
-            messagebox.showinfo("ยังพรีวิวไม่ได้", str(e))
+            messagebox.showinfo("ยังแสดงตัวอย่างไม่ได้", str(e))
             return
         job = self._snapshot()
         self._start_spinner()   # โชว์สปินเนอร์กลางพรีวิวระหว่างสร้างภาพ
@@ -972,7 +1204,7 @@ class App(tk.Tk):
                 png = os.path.join(tempfile.gettempdir(), f"_tent_prev_{idx}.png")
                 png = wio.render_preview_png(docx, png, dpi=PREVIEW_DPI)
                 self._preview_cache[key] = png
-            return ("preview", png, f"พรีวิว คนที่ {idx + 1}/{len(job['rows'])}")
+            return ("preview", png, f"แสดงตัวอย่าง คนที่ {idx + 1}/{len(job['rows'])}")
 
         # โหมดทีละคน
         d = job["single"]
@@ -980,7 +1212,7 @@ class App(tk.Tk):
         docx = me.generate_one(ttype, d["name"], d["position"], d["org"], out_path=tmp,
                                logo=job.get("logo"))
         png = wio.render_preview_png(docx, dpi=PREVIEW_DPI)
-        return ("preview", png, "พรีวิวเรียบร้อย")
+        return ("preview", png, "แสดงตัวอย่างเรียบร้อย")
 
     def _preview_prev(self):
         if self.busy or self.mode.get() != "batch" or not self._batch_rows:
@@ -1217,7 +1449,7 @@ class App(tk.Tk):
             self.navbar.pack(fill="x", pady=(0, 6), before=self.canvas)
         self._update_nav_label()
         self._refresh_buttons()
-        self._set_status(f"นำเข้า {len(rows)} คนแล้ว — กด Preview เพื่อดู (เลื่อน ◀ ▶ ดูคนอื่นได้)", "#080")
+        self._set_status(f"นำเข้า {len(rows)} คนแล้ว — กดแสดงตัวอย่างเพื่อดู (เลื่อน ◀ ▶ ดูคนอื่นได้)", "#080")
 
     # ---- แก้/เพิ่ม/ลบ รายชื่อในตาราง ----
     def _edit_cell(self, event):
@@ -1279,7 +1511,7 @@ class App(tk.Tk):
         self._sync_rows_from_tree()
         if not self.tree.get_children():
             self.navbar.pack_forget()
-            self.canvas.delete("all")
+            self._draw_placeholder()
         self._set_status(f"ลบแล้ว {len(sel)} รายการ", "#080")
 
     def _clear_all(self):
@@ -1302,7 +1534,7 @@ class App(tk.Tk):
         self.lbl_batch.configure(text="ยังไม่ได้เลือกไฟล์")
         self.navbar.pack_forget()
         self._stop_spinner()
-        self.canvas.delete("all")
+        self._draw_placeholder()
         self._update_nav_label()
         self._refresh_buttons()
         self._set_status(f"ล้างรายชื่อทั้งหมดแล้ว ({n} รายการ)", "#080")

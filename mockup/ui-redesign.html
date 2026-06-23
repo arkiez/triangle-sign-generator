@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>สร้างป้ายสามเหลี่ยม — UI Redesign (แนวทาง C)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   UI Redesign mockup — แนวทาง C (ปรับโครงสร้างเดิม)
+   เป้าหมาย: ลด scroll + ลดความรก
+   อ้างอิง spec: docs/superpowers/specs/2026-06-23-ui-layout-redesign-design.md
+   ============================================================ */
+:root{
+  --accent:#0067C0;
+  --accent-hover:#1975C5;
+  --accent-active:#005BA1;
+  --accent-soft:#e6f1fb;
+
+  --bg:#f3f3f3;          /* Mica */
+  --card:#ffffff;        /* Layer */
+  --text:#1b1b1b;
+  --muted:#5c5c5c;
+  --border:#e5e5e5;
+  --field:#fbfbfb;
+  --row-alt:#fafafa;
+  --btn-border:#d6d6d6;
+
+  --r:6px;               /* corner radius */
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Kanit',system-ui,sans-serif;
+  background:#d9d9d9;color:var(--text);
+  min-height:100vh;display:flex;align-items:flex-start;justify-content:center;
+  padding:28px 16px;gap:24px;flex-wrap:wrap;
+}
+
+/* ---------------- หน้าต่างแอป ---------------- */
+.window{
+  width:980px;max-width:100%;background:var(--bg);
+  border-radius:10px;overflow:hidden;
+  box-shadow:0 20px 56px rgba(0,0,0,.28),0 4px 12px rgba(0,0,0,.16);
+}
+
+/* แถบหัวโปรแกรม */
+.titlebar{
+  display:flex;align-items:center;gap:8px;
+  background:var(--bg);padding:10px 14px;border-bottom:1px solid var(--border);
+}
+.titlebar .mark{color:var(--accent);font-size:18px;font-weight:700;line-height:1}
+.titlebar h1{font-size:16px;font-weight:700}
+.titlebar .ver{margin-left:auto;color:var(--muted);font-size:12px;font-weight:400}
+
+/* เลย์เอาต์ 2 คอลัมน์ */
+.body{display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px}
+
+/* ---------------- คอลัมน์ซ้าย (ฟอร์ม) ---------------- */
+.form{display:flex;flex-direction:column;gap:12px}
+
+/* [A] แถบเลือกแบบ+โหมด (กะทัดรัด) */
+.topbar{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:8px}
+.pickrow{display:flex;align-items:center;gap:10px}
+.pickrow > .lbl{font-size:13px;color:var(--muted);width:34px;flex:none}
+
+/* segmented control */
+.seg{display:flex;gap:4px;background:var(--field);border:1px solid #e0e0e0;border-radius:var(--r);padding:3px;flex:1}
+.seg button{
+  flex:1;border:none;background:transparent;border-radius:4px;cursor:pointer;
+  font-family:inherit;font-size:13px;color:var(--muted);padding:6px 8px;line-height:1.2;
+  transition:.12s;
+}
+.seg button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.10);border:1px solid #d4d4d4}
+
+/* [B–D] หมวดพับเก็บได้ (accordion) */
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.sec-head{
+  display:flex;align-items:center;gap:8px;width:100%;
+  background:transparent;border:none;cursor:pointer;font-family:inherit;
+  height:36px;padding:0 12px;color:var(--text);
+}
+.sec-head .chev{color:var(--accent);font-size:11px;transition:transform .15s;width:12px}
+.section.collapsed .sec-head .chev{transform:rotate(-90deg)}
+.sec-head .ttl{font-size:15px;font-weight:600}
+.sec-head .hint{margin-left:auto;font-size:11px;color:var(--muted);font-weight:400}
+.sec-body{padding:4px 14px 14px;display:flex;flex-direction:column;gap:8px}
+.section.collapsed .sec-body{display:none}
+
+/* ช่องกรอก */
+.field-row{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:10px}
+.field-row > label{font-size:13px;font-weight:600}
+input[type=text],input[type=number]{
+  width:100%;font-family:inherit;font-size:13px;color:var(--text);
+  background:var(--field);border:1px solid var(--border);border-radius:var(--r);
+  padding:7px 10px;outline:none;transition:.12s;
+}
+input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+
+/* กริด 2 คอลัมน์ (ตัวเลขสั้น) */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+.numfield{display:flex;align-items:center;gap:8px}
+.numfield label{font-size:13px;color:var(--text);flex:1}
+.numfield input{width:74px;text-align:right}
+
+/* รายชื่อ (batch) */
+.batch-top{display:flex;align-items:center;gap:10px}
+.table{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:#fff}
+.thead,.trow{display:grid;grid-template-columns:1.4fr 1.1fr 1.2fr}
+.thead{background:var(--bg);font-weight:600;font-size:12px}
+.thead > div{padding:7px 10px;border-bottom:1px solid var(--border)}
+.trow > div{padding:7px 10px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow.alt{background:var(--row-alt)}
+.trow:hover{background:var(--accent-soft)}
+.tempty{padding:10px;text-align:center;color:var(--muted);font-size:11px}
+.batch-edit{display:flex;gap:6px}
+
+/* แถวโลโก้ */
+.logo-toggle-row{display:flex;align-items:center;justify-content:space-between}
+.logo-toggle-row span{font-size:13px}
+.switch{width:40px;height:22px;border-radius:11px;background:var(--field);border:1px solid #8a8a8a;position:relative;cursor:pointer;transition:.15s;flex:none}
+.switch::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;background:#8a8a8a;top:3px;left:3px;transition:.15s}
+.switch.on{background:var(--accent);border-color:var(--accent)}
+.switch.on::after{background:#fff;left:21px}
+.logo-btns{display:flex;gap:6px}
+.note{font-size:11px;color:var(--muted);line-height:1.4}
+
+/* ปุ่ม */
+.btn{font-family:inherit;font-size:13px;border-radius:var(--r);cursor:pointer;padding:8px 12px;border:1px solid var(--btn-border);background:#fff;color:var(--text);transition:.12s}
+.btn:hover{background:#f6f6f6}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.primary:hover{background:var(--accent-hover)}
+
+/* [E] แถวปุ่มสั่งงาน */
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px}
+.actions .btn.full{grid-column:1 / -1}
+
+/* ---------------- คอลัมน์ขวา (พรีวิว) ---------------- */
+.preview{background:var(--card);border:1px solid var(--border);border-radius:var(--r);display:flex;flex-direction:column;min-height:520px}
+.preview .sec-head{cursor:default}
+.preview-canvas{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);text-align:center;padding:24px}
+.preview-canvas .ph{width:120px;height:108px;background:var(--accent-soft);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:48px;color:var(--accent)}
+.preview-canvas .t1{font-size:16px;font-weight:600;color:var(--text)}
+.preview-canvas .t2{font-size:13px}
+
+/* แถบสถานะ */
+.statusbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;color:var(--muted);font-size:11px;border-top:1px solid var(--border);background:var(--bg)}
+.statusbar .ok{color:var(--text);font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.statusbar .dot{width:8px;height:8px;border-radius:50%;background:#2da44e;box-shadow:0 0 0 3px rgba(45,164,78,.18)}
+
+/* ---------------- แผง annotation ---------------- */
+.notes{width:300px;max-width:100%;font-size:13px;color:#333;line-height:1.6}
+.notes h2{font-size:16px;margin-bottom:8px;color:#111}
+.notes h3{font-size:13px;margin:14px 0 4px;color:var(--accent)}
+.notes ul{padding-left:18px}
+.notes li{margin:3px 0}
+.notes .chip{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <!-- แถบหัว -->
+  <div class="titlebar">
+    <span class="mark">▲</span>
+    <h1>สร้างป้ายสามเหลี่ยม</h1>
+    <span class="ver">Mail Merge · v1.4.1</span>
+  </div>
+
+  <div class="body">
+    <!-- ===== ซ้าย: ฟอร์ม ===== -->
+    <div class="form">
+
+      <!-- [A] แถบเลือกแบบ + โหมด -->
+      <div class="topbar">
+        <div class="pickrow">
+          <span class="lbl">แบบ</span>
+          <div class="seg" id="segType">
+            <button class="on" data-type="t1">แบบ 1: ชื่อ + ตำแหน่ง/หน่วยงาน</button>
+            <button data-type="t2">แบบ 2: ชื่ออย่างเดียว</button>
+          </div>
+        </div>
+        <div class="pickrow">
+          <span class="lbl">โหมด</span>
+          <div class="seg" id="segMode">
+            <button class="on">รายคน</button>
+            <button>นำเข้ารายชื่อ (Excel/CSV)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- [B] ข้อมูล (เปิดค้าง) -->
+      <div class="section" id="secData">
+        <button class="sec-head" onclick="toggle('secData')">
+          <span class="chev">▼</span><span class="ttl">ข้อมูล</span>
+        </button>
+        <div class="sec-body">
+          <div class="field-row"><label>ชื่อ</label><input type="text" value="นายสมชาย ใจดี"></div>
+          <div class="field-row pos"><label>ตำแหน่ง</label><input type="text" value="ผู้อำนวยการ"></div>
+          <div class="field-row org"><label>หน่วยงาน</label><input type="text" value="โรงเรียนบ้านสามเหลี่ยม"></div>
+        </div>
+      </div>
+
+      <!-- [B2] รายชื่อ (โหมดนำเข้า — ซ่อน default) -->
+      <div class="section" id="secBatch" style="display:none">
+        <button class="sec-head" onclick="toggle('secBatch')">
+          <span class="chev">▼</span><span class="ttl">รายชื่อ</span>
+        </button>
+        <div class="sec-body">
+          <div class="batch-top">
+            <button class="btn">📂 Choose Excel/CSV…</button>
+            <span class="note">ยังไม่ได้เลือกไฟล์</span>
+          </div>
+          <div class="note">ดับเบิลคลิกเพื่อแก้ในช่อง · Ctrl+C คัดลอก · Ctrl+V วางจาก Excel · Del ลบแถว</div>
+          <div class="table">
+            <div class="thead">
+              <div>ชื่อ</div><div>ตำแหน่ง</div><div>หน่วยงาน</div>
+            </div>
+            <div class="trow"><div>นายสมชาย ใจดี</div><div>ผู้อำนวยการ</div><div>โรงเรียนบ้านสามเหลี่ยม</div></div>
+            <div class="trow alt"><div>นางสาวมาลี รักเรียน</div><div>ครู</div><div>โรงเรียนบ้านสามเหลี่ยม</div></div>
+            <div class="trow"><div>นายอนุชา ตั้งใจ</div><div>รองผู้อำนวยการ</div><div>โรงเรียนบ้านสามเหลี่ยม</div></div>
+            <div class="tempty">— เพิ่มรายชื่อ หรือนำเข้าจาก Excel/CSV —</div>
+          </div>
+          <div class="batch-edit">
+            <button class="btn">➕ เพิ่มคน</button>
+            <button class="btn">🗑 ลบที่เลือก</button>
+            <button class="btn" style="margin-left:auto">🧹 ล้างทั้งหมด</button>
+          </div>
+          <div class="seg" id="segOut">
+            <button class="on">รวมไฟล์เดียว</button>
+            <button>แยกไฟล์ต่อคน</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- [C] โลโก้/ตรา (พับ default) -->
+      <div class="section collapsed" id="secLogo">
+        <button class="sec-head" onclick="toggle('secLogo')">
+          <span class="chev">▼</span><span class="ttl">โลโก้/ตรา</span>
+          <span class="hint">ปิดอยู่</span>
+        </button>
+        <div class="sec-body">
+          <div class="logo-toggle-row">
+            <span>ใส่โลโก้บนป้าย</span>
+            <div class="switch" id="logoSwitch" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="logo-btns">
+            <button class="btn">🖼 เลือกรูป…</button>
+            <button class="btn">ลบรูป</button>
+          </div>
+          <div class="note">ยังไม่ได้เลือกรูป</div>
+          <div class="grid2">
+            <div class="numfield"><label>ตำแหน่ง X (ซม.)</label><input type="number" value="1.00"></div>
+            <div class="numfield"><label>Y (ซม.)</label><input type="number" value="1.00"></div>
+            <div class="numfield"><label>กว้าง (ซม.)</label><input type="number" value="3.00"></div>
+            <div class="numfield"><label>สูง (ซม.)</label><input type="number" value="3.00"></div>
+          </div>
+          <div class="note">ปรับขนาดล็อกสัดส่วนอัตโนมัติ · โลโก้จะขึ้นทุกหน้าของป้าย (หมุนตามหน้า)</div>
+        </div>
+      </div>
+
+      <!-- [E] ปุ่มสั่งงาน -->
+      <div class="actions">
+        <button class="btn primary full">🔍  Preview</button>
+        <button class="btn">💾  Save .docx</button>
+        <button class="btn">📝  Open in Word</button>
+        <button class="btn">📄  Export PDF</button>
+        <button class="btn">🖨  Print</button>
+      </div>
+    </div>
+
+    <!-- ===== ขวา: พรีวิว ===== -->
+    <div class="preview">
+      <button class="sec-head"><span class="chev">▦</span><span class="ttl">พรีวิว</span></button>
+      <div class="preview-canvas">
+        <div class="ph">▲</div>
+        <div class="t1">ยังไม่มีพรีวิว</div>
+        <div class="t2">กรอกข้อมูลแล้วกดปุ่ม “Preview”<br>เพื่อดูภาพป้ายก่อนบันทึก</div>
+      </div>
+      <div class="statusbar">
+        <span class="ok"><span class="dot"></span>พร้อมใช้งาน</span>
+        <span>v1.4.1 · Powered by Arkie'z K. Khositkhanawut</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- คำอธิบายดีไซน์ -->
+<div class="notes">
+  <h2>UI Redesign — แนวทาง C</h2>
+  <p>ปรับโครงสร้างเดิม (panel เดียว) ให้ <b>scroll น้อยลง</b> และ <b>ดูเป็นระเบียบ</b></p>
+
+  <h3>สิ่งที่เปลี่ยน</h3>
+  <ul>
+    <li><span class="chip">A</span> รวม “แบบป้าย” + “โหมด” เป็นแถบ segmented กะทัดรัด — เดิมเป็น 2 การ์ดเต็มความสูง</li>
+    <li><span class="chip">B</span> “ข้อมูล” เปิดค้างเสมอ (ใช้บ่อยสุด)</li>
+    <li><span class="chip">C</span> “โลโก้/ตรา” พับเก็บ default → ลดความสูง คลิกหัวข้อเพื่อกาง</li>
+    <li><span class="chip">D</span> ช่องตัวเลขโลโก้จัดเป็นกริด 2 คอลัมน์ (X/Y/กว้าง/สูง)</li>
+    <li><span class="chip">E</span> ปุ่มสั่งงานท้ายฟอร์ม — Preview เด่น (accent) ที่เหลือเป็นปุ่มรอง</li>
+  </ul>
+
+  <h3>ผลลัพธ์</h3>
+  <ul>
+    <li>เปิดมาเห็น แบบ+โหมด, ข้อมูล, ปุ่ม — จบในจอเดียว ไม่ต้อง scroll</li>
+    <li>spacing scale เดียว (4/8/12/16) · หัวข้อหมวดสไตล์เดียวกัน · เส้นแบ่งชัด</li>
+  </ul>
+
+  <h3>ลองกดเล่น</h3>
+  <ul>
+    <li>สลับโหมด “นำเข้ารายชื่อ” → ช่องกรอกเปลี่ยนเป็น <b>ตารางรายชื่อ</b></li>
+    <li>คลิกหัวข้อ “โลโก้/ตรา” เพื่อกาง/พับ</li>
+    <li>สลับ “แบบ 2” → ช่องตำแหน่ง/หน่วยงานจะซ่อน</li>
+    <li>กดสวิตช์ “ใส่โลโก้บนป้าย”</li>
+  </ul>
+</div>
+
+<script>
+function toggle(id){document.getElementById(id).classList.toggle('collapsed');
+  var s=document.querySelector('#'+id+' .hint'); if(s) s.textContent=document.getElementById(id).classList.contains('collapsed')?'ปิดอยู่':'เปิดอยู่';}
+
+// segmented: แบบป้าย
+document.querySelectorAll('#segType button').forEach(function(b){
+  b.onclick=function(){
+    document.querySelectorAll('#segType button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    var t2 = b.dataset.type==='t2';
+    document.querySelectorAll('#secData .pos, #secData .org').forEach(el=>el.style.display=t2?'none':'grid');
+  };
+});
+// segmented: โหมด — สลับ ข้อมูล (ทีละคน) ↔ รายชื่อ (นำเข้า)
+document.querySelectorAll('#segMode button').forEach(function(b,i){
+  b.onclick=function(){
+    document.querySelectorAll('#segMode button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    var batch = i===1;  // 0=รายคน, 1=นำเข้ารายชื่อ
+    document.getElementById('secData').style.display  = batch?'none':'';
+    document.getElementById('secBatch').style.display = batch?'':'none';
+  };
+});
+// segmented: รวม/แยกไฟล์
+document.querySelectorAll('#segOut button').forEach(function(b){
+  b.onclick=function(){
+    document.querySelectorAll('#segOut button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+  };
+});
+</script>
+</body>
+</html>
